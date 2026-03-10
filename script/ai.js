@@ -4,11 +4,11 @@ module.exports.config = {
   name: "ai",
   version: "2.0.0",
   hasPermssion: 0,
-  credits: "Vern (improved)",
-  description: "Chat with AI and describe photos",
-  commandCategory: "fun",
-  usages: "ai <prompt> or send a photo",
-  cooldowns: 3
+  credits: "Yasis",
+  description: "ask a questions",
+  commandCategory: "search",
+  usages: "ai <ask a questions> made by yasis",
+  cooldowns: 2
 };
 
 module.exports.run = async function ({ api, event, args }) {
