@@ -20,7 +20,7 @@ module.exports.run = async function ({ api, event, args }) {
 
   if (!prompt) {
     return api.sendMessage(
-      "🖼 Please enter a prompt.\n\nExample:\n gen cyberpunk city",
+      "🖼 Please enter a prompt.\n\nExample:\n gen manwel yasis tayob",
       threadID,
       messageID
     );
