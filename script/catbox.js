@@ -2,12 +2,12 @@ const axios = require("axios");
 
 module.exports.config = {
   name: "catbox",
-  version: "1.0.0",
+  version: "1.1.0",
   hasPermssion: 0,
   credits: "Yasis",
   description: "Upload image to Catbox",
   commandCategory: "tools",
-  usages: "catbox (reply to image or paste image URL)",
+  usages: "reply to image or provide image URL",
   cooldowns: 3
 };
 
@@ -17,23 +17,20 @@ module.exports.run = async function ({ api, event, args }) {
 
   let imageUrl;
 
-  // If replying to a photo
+  // reply image
   if (messageReply && messageReply.attachments && messageReply.attachments.length > 0) {
     const attachment = messageReply.attachments.find(a => a.type === "photo");
-
-    if (attachment) {
-      imageUrl = attachment.url;
-    }
+    if (attachment) imageUrl = attachment.url;
   }
 
-  // If user provided URL
-  if (!imageUrl && args.length > 0) {
+  // manual url
+  if (!imageUrl && args[0]) {
     imageUrl = args[0];
   }
 
   if (!imageUrl) {
     return api.sendMessage(
-      "📌 Please reply to an image or provide an image URL.",
+      "📌 Reply to an image or provide an image URL.",
       threadID,
       messageID
     );
@@ -47,27 +44,31 @@ module.exports.run = async function ({ api, event, args }) {
 
     const res = await axios.get(apiUrl);
 
-    if (!res.data || !res.data.url) {
-      return api.sendMessage(
-        "❌ Failed to upload image.",
-        threadID,
-        messageID
-      );
+    const data = res.data;
+
+    // detect response format
+    const catboxUrl =
+      data.url ||
+      data.result ||
+      data.link ||
+      data;
+
+    if (!catboxUrl) {
+      console.log("API RESPONSE:", data);
+      return api.sendMessage("❌ Upload failed.", threadID, messageID);
     }
 
-    const catboxUrl = res.data.url;
-
-    api.sendMessage(
-      `📦 Image Uploaded\n\n🔗 ${catboxUrl}`,
+    return api.sendMessage(
+      `📦 Image Uploaded to Catbox\n\n🔗 ${catboxUrl}`,
       threadID,
       messageID
     );
 
   } catch (err) {
 
-    console.error(err);
+    console.error("Catbox Error:", err.message);
 
-    api.sendMessage(
+    return api.sendMessage(
       "❌ Error uploading image.",
       threadID,
       messageID
