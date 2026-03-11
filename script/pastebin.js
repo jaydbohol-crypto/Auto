@@ -2,7 +2,7 @@ const axios = require("axios");
 
 module.exports.config = {
   name: "pastebin",
-  version: "1.1.0",
+  version: "1.2.0",
   hasPermssion: 0,
   credits: "Yasis",
   description: "Upload text to Pastebin",
@@ -17,19 +17,18 @@ module.exports.run = async function ({ api, event, args }) {
 
   let text;
 
-  // if replying to text
+  // reply support
   if (messageReply && messageReply.body) {
     text = messageReply.body;
-  }
-
-  // if prompting text
+  } 
+  // prompt support
   else if (args.length > 0) {
     text = args.join(" ");
   }
 
   if (!text) {
     return api.sendMessage(
-      "📌 Please reply to a message or enter text to upload to Pastebin.",
+      "📌 Reply to a message or type text to upload.",
       threadID,
       messageID
     );
@@ -45,19 +44,16 @@ module.exports.run = async function ({ api, event, args }) {
 
     const data = res.data;
 
+    // extract URL safely
     const pasteUrl =
-      data.url ||
-      data.result ||
-      data.link ||
-      data;
+      data?.result?.url ||
+      data?.url ||
+      data?.result ||
+      data?.link;
 
     if (!pasteUrl) {
-      console.log("API RESPONSE:", data);
-      return api.sendMessage(
-        "❌ Failed to upload text.",
-        threadID,
-        messageID
-      );
+      console.log("Pastebin API Response:", data);
+      return api.sendMessage("❌ Failed to get Pastebin URL.", threadID, messageID);
     }
 
     return api.sendMessage(
@@ -75,7 +71,6 @@ module.exports.run = async function ({ api, event, args }) {
       threadID,
       messageID
     );
-
   }
 
 };
