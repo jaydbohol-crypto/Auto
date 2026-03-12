@@ -1,97 +1,71 @@
-const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
+const axios = require("axios")
 
-module.exports.config = {
+module.exports = {
   name: "spotify",
-  version: "2.0.0",
-  hasPermssion: 0,
-  credits: "Yasis",
-  description: "Play music with cover",
-  commandCategory: "music",
-  usages: "spotify <song name>",
-  cooldowns: 5
-};
+  aliases: ["sp"],
+  description: "Search Spotify and send playable audio",
 
-module.exports.run = async function ({ api, event, args }) {
+  async execute(sock, m, args) {
 
-  const { threadID, messageID } = event;
-  const query = args.join(" ");
+    const query = args.join(" ")
 
-  if (!query) {
-    return api.sendMessage(
-      "🎵 Please enter a song name.\nExample: spotify believer",
-      threadID,
-      messageID
-    );
-  }
-
-  try {
-
-    api.sendMessage("🔎 Searching song...", threadID, messageID);
-
-    // search song
-    const res = await axios.get(`https://api.popcat.xyz/ytsearch?q=${encodeURIComponent(query)}`);
-    const video = res.data[0];
-
-    if (!video) {
-      return api.sendMessage("❌ Song not found.", threadID, messageID);
+    if (!query) {
+      return sock.sendMessage(m.key.remoteJid, {
+        text: "❌ Enter a song name."
+      })
     }
 
-    const title = video.title;
-    const channel = video.channel;
-    const duration = video.duration;
-    const thumb = video.thumbnail;
-    const videoId = video.id;
+    try {
 
-    // youtube mp3 api
-    const audioApi = `https://api.vevioz.com/api/button/mp3/${videoId}`;
+      const url = `https://deku-api.giize.com/search/spotify?q=${encodeURIComponent(query)}`
+      const { data } = await axios.get(url)
 
-    // cache folder
-    const cacheDir = path.join(__dirname, "cache");
-    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
+      if (!data.result || data.result.length === 0) {
+        return sock.sendMessage(m.key.remoteJid, {
+          text: "❌ Song not found."
+        })
+      }
 
-    const audioPath = path.join(cacheDir, `spotify_${Date.now()}.mp3`);
-    const coverPath = path.join(cacheDir, `cover_${Date.now()}.jpg`);
+      const song = data.result[0]
 
-    // download cover
-    const cover = await axios.get(thumb, { responseType: "arraybuffer" });
-    fs.writeFileSync(coverPath, cover.data);
+      const caption =
+`🎵 *${song.title || "Unknown"}*
+👤 Artist: ${song.artist || "Unknown"}
+💿 Album: ${song.album || "Unknown"}
 
-    // download audio
-    const audio = await axios.get(audioApi, { responseType: "arraybuffer" });
-    fs.writeFileSync(audioPath, audio.data);
+🔗 ${song.url || ""}`
 
-    api.sendMessage(
-      {
-        body:
-`🎵 Now Playing
+      // Send cover image
+      if (song.image) {
+        await sock.sendMessage(m.key.remoteJid, {
+          image: { url: song.image },
+          caption
+        }, { quoted: m })
+      }
 
-Title: ${title}
-Channel: ${channel}
-Duration: ${duration}`,
-        attachment: [
-          fs.createReadStream(coverPath),
-          fs.createReadStream(audioPath)
-        ]
-      },
-      threadID,
-      () => {
-        fs.unlinkSync(audioPath);
-        fs.unlinkSync(coverPath);
-      },
-      messageID
-    );
+      // Send playable audio
+      if (song.audio || song.preview || song.download) {
 
-  } catch (err) {
+        const audioUrl =
+          song.audio ||
+          song.preview ||
+          song.download
 
-    console.log(err);
+        await sock.sendMessage(m.key.remoteJid, {
+          audio: { url: audioUrl },
+          mimetype: "audio/mpeg",
+          ptt: false
+        }, { quoted: m })
 
-    api.sendMessage(
-      "❌ Failed to fetch the song.",
-      threadID,
-      messageID
-    );
+      }
+
+    } catch (err) {
+
+      await sock.sendMessage(m.key.remoteJid, {
+        text: "❌ Failed to fetch the song."
+      })
+
+    }
+
   }
-
-};
+}
