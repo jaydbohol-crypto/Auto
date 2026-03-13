@@ -3,128 +3,130 @@ const fs = require("fs");
 const path = require("path");
 
 module.exports.config = {
-  name: "onlytik",
-  version: "1.0.0",
-  hasPermssion: 0,
-  credits: "selov",
-  description: "Get random TikTok videos",
-  commandCategory: "media",
-  usages: "onlytik (random) or onlytik <count>",
-  cooldowns: 3
+	name: "onlytik",
+	version: "1.0.0",
+	role: 0,
+	credits: "selov",
+	description: "Generate a random TikTok video",
+	usages: "[]",
+	cooldown: 0,
+	hasPrefix: true,
 };
 
-const memory = {};
+module.exports.run = async ({ api, event, args }) => {
+	api.setMessageReaction("⏳", event.messageID, (err) => {}, true);
+	api.sendTypingIndicator(event.threadID, true);
 
-module.exports.run = async function ({ api, event, args }) {
-  const { threadID, messageID, senderID } = event;
-  let count = 1;
+	const { messageID, threadID } = event;
 
-  try {
-    // Check if user specified count (e.g., onlytik 3)
-    if (args[0] && !isNaN(args[0])) {
-      count = parseInt(args[0]);
-      if (count < 1) count = 1;
-      if (count > 5) count = 5; // Limit to 5 videos max
-    }
+	try {
+		// Fetch video from the API
+		const apiUrl = `https://haji-mix-api.gleeze.com/api/onlytik?stream=true`;
+		const response = await axios.get(apiUrl);
+		
+		// Log the response to see the structure (for debugging)
+		console.log("API Response:", JSON.stringify(response.data, null, 2));
 
-    const user = await api.getUserInfo(senderID);
-    const senderName = user[senderID]?.name || "User";
+		// Check different possible response structures
+		let videoUrl = null;
+		let videoTitle = "Random TikTok Video";
+		let videoAuthor = "Unknown";
+		
+		if (response.data) {
+			// Try to find video URL in different formats
+			if (response.data.videoUrl) {
+				videoUrl = response.data.videoUrl;
+			} else if (response.data.playUrl) {
+				videoUrl = response.data.playUrl;
+			} else if (response.data.downloadUrl) {
+				videoUrl = response.data.downloadUrl;
+			} else if (response.data.url) {
+				videoUrl = response.data.url;
+			} else if (response.data.play) {
+				videoUrl = response.data.play;
+			} else if (response.data.video) {
+				videoUrl = response.data.video;
+			} else if (response.data.shotiurl) { // Your original code used shotiurl
+				videoUrl = response.data.shotiurl;
+			} else if (Array.isArray(response.data) && response.data.length > 0) {
+				// If response is an array, take first item
+				const firstItem = response.data[0];
+				videoUrl = firstItem.videoUrl || firstItem.playUrl || firstItem.url;
+				videoTitle = firstItem.title || firstItem.desc || "TikTok Video";
+				videoAuthor = firstItem.author || firstItem.username || "Unknown";
+			}
+			
+			// Try to get title and author if available
+			if (response.data.title) videoTitle = response.data.title;
+			if (response.data.desc) videoTitle = response.data.desc;
+			if (response.data.author) videoAuthor = response.data.author;
+			if (response.data.username) videoAuthor = response.data.username;
+		}
 
-    if (!memory[threadID]) memory[threadID] = [];
-    memory[threadID].push(`${senderName} requested ${count} random TikTok video(s)`);
+		if (!videoUrl) {
+			return api.sendMessage("❌ No video URL found in API response.", threadID, messageID);
+		}
 
-    const searching = await api.sendMessage(`🎲 Fetching ${count} random TikTok video(s)...`, threadID, messageID);
+		// Create cache directory if it doesn't exist
+		const cacheDir = path.join(__dirname, "cache");
+		if (!fs.existsSync(cacheDir)) {
+			fs.mkdirSync(cacheDir, { recursive: true });
+		}
 
-    // Try different possible API formats
-    let apiUrl;
-    let videos = [];
+		// Video file path
+		const videoPath = path.join(cacheDir, `onlytik_${Date.now()}.mp4`);
 
-    // Attempt 1: Random endpoint with count
-    apiUrl = `https://haji-mix-api.gleeze.com/api/onlytik?random=true&limit=${count}&stream=true`;
-    
-    try {
-      const res = await axios.get(apiUrl);
-      videos = res.data.videos || res.data.data || (Array.isArray(res.data) ? res.data : [res.data]);
-    } catch (e) {
-      // Attempt 2: Without random parameter
-      apiUrl = `https://haji-mix-api.gleeze.com/api/onlytik?limit=${count}&stream=true`;
-      const res = await axios.get(apiUrl);
-      videos = res.data.videos || res.data.data || (Array.isArray(res.data) ? res.data : [res.data]);
-    }
+		// Download the video with proper headers
+		const videoRes = await axios.get(videoUrl, { 
+			responseType: "arraybuffer",
+			timeout: 60000,
+			headers: {
+				'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+			}
+		});
 
-    if (!videos || videos.length === 0) {
-      return api.editMessage("❌ No videos available right now.", searching.messageID);
-    }
+		// Save the video
+		fs.writeFileSync(videoPath, videoRes.data);
 
-    // Limit to requested count
-    videos = videos.slice(0, count);
-    
-    const cacheDir = path.join(__dirname, "cache");
-    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+		// Get file size
+		const stats = fs.statSync(videoPath);
+		const fileSizeInMB = (stats.size / (1024 * 1024)).toFixed(2);
 
-    let successCount = 0;
-    const videoPaths = [];
+		// Send the video
+		api.setMessageReaction("✅", event.messageID, (err) => {}, true);
+		
+		// Prepare message body
+		let body = `🎵 RANDOM TIKTOK VIDEO\n━━━━━━━━━━━━━━━━\n`;
+		body += `📹 Title: ${videoTitle}\n`;
+		body += `👤 Author: ${videoAuthor}\n`;
+		body += `📦 Size: ${fileSizeInMB} MB\n`;
+		body += `━━━━━━━━━━━━━━━━\n`;
+		body += `💬 Enjoy your random video!`;
 
-    for (let i = 0; i < videos.length; i++) {
-      const video = videos[i];
-      
-      // Try to find video URL in different possible fields
-      const videoUrl = video.videoUrl || video.playUrl || video.downloadUrl || video.url || video.play || video.video;
-      
-      if (!videoUrl) {
-        console.log(`Video ${i+1} has no URL:`, video);
-        continue;
-      }
+		// Send with attachment
+		api.sendMessage(
+			{
+				body: body,
+				attachment: fs.createReadStream(videoPath)
+			},
+			threadID,
+			(err) => {
+				if (err) console.error("Error sending video:", err);
+				// Clean up file
+				try {
+					if (fs.existsSync(videoPath)) {
+						fs.unlinkSync(videoPath);
+					}
+				} catch (e) {
+					console.error("Error deleting file:", e);
+				}
+			},
+			messageID
+		);
 
-      try {
-        api.editMessage(`📥 Downloading video ${i+1}/${videos.length}...`, searching.messageID);
-
-        const videoPath = path.join(cacheDir, `onlytik_${Date.now()}_${i}.mp4`);
-        const videoRes = await axios.get(videoUrl, { 
-          responseType: "arraybuffer",
-          timeout: 60000,
-          headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-
-        fs.writeFileSync(videoPath, videoRes.data);
-        videoPaths.push(videoPath);
-        successCount++;
-      } catch (err) {
-        console.error(`Failed to download video ${i+1}:`, err.message);
-      }
-    }
-
-    if (successCount === 0) {
-      return api.editMessage("❌ Failed to download any videos.", searching.messageID);
-    }
-
-    // Prepare attachments
-    const attachments = videoPaths.map(p => fs.createReadStream(p));
-
-    // Send videos
-    api.sendMessage(
-      {
-        body: `🎵 RANDOM TIKTOK VIDEOS\n━━━━━━━━━━━━━━━━\n` +
-              `📹 Requested: ${successCount} video(s)\n` +
-              `💬 Requested by: ${senderName}`,
-        attachment: attachments
-      },
-      threadID,
-      (err) => {
-        if (err) console.error("Error sending videos:", err);
-        // Clean up files
-        videoPaths.forEach(p => {
-          try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch (e) {}
-        });
-      },
-      messageID
-    );
-
-    api.editMessage(`✅ Sent ${successCount} video(s)!`, searching.messageID);
-    memory[threadID].push(`Downloaded ${successCount} random TikTok videos`);
-
-  } catch (err) {
-    console.error("OnlyTik Error:", err);
-    api.sendMessage(`❌ Error: ${err.message}`, threadID, messageID);
-  }
+	} catch (err) {
+		console.error("OnlyTik Error:", err);
+		api.setMessageReaction("❌", event.messageID, (err) => {}, true);
+		api.sendMessage(`❌ Error: ${err.message}`, threadID, messageID);
+	}
 };
