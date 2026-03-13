@@ -1,14 +1,16 @@
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 
 module.exports.config = {
   name: "spotify",
   version: "1.0.0",
   hasPermssion: 0,
-  credits: "selov",
-  description: "Search for songs on Spotify",
+  credits: "Selov",
+  description: "Download and send MP3 songs",
   commandCategory: "music",
   usages: "spotify <song name>",
-  cooldowns: 2
+  cooldowns: 5
 };
 
 // Simple memory per thread
@@ -19,13 +21,11 @@ module.exports.run = async function ({ api, event, args }) {
   const query = args.join(" ").trim();
 
   try {
-    // Get sender name
     const user = await api.getUserInfo(senderID);
     const senderName = user[senderID]?.name || "User";
 
-    // Initialize memory
     if (!memory[threadID]) memory[threadID] = [];
-    memory[threadID].push(`${senderName} searched Spotify for: ${query || "nothing"}`);
+    memory[threadID].push(`${senderName} requested: ${query}`);
 
     if (!query) {
       return api.sendMessage(
@@ -35,112 +35,70 @@ module.exports.run = async function ({ api, event, args }) {
       );
     }
 
-    api.sendMessage("🔍 Searching Spotify...", threadID, messageID);
+    api.sendMessage("🔍 Searching and downloading MP3...", threadID, messageID);
 
-    // Your API with the working key
-    const apiUrl = `https://rapido-api.vercel.app/api/sp?query=${encodeURIComponent(query)}&apikey=zk-f50c8cb6ab9a0932f90abe0ea147959f227845da812fbeb30c8e114950a3ddd4`;
+    // Using a YouTube to MP3 API (you need to find a reliable one)
+    // Option A: Try this free API first
+    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&key=YOUR_YOUTUBE_API_KEY&maxResults=1&type=video`;
+    
+    // Option B: Alternative free API for testing
+    const apiUrl = `https://api.dipto.xyz/api/yt?query=${encodeURIComponent(query)}&type=audio`;
     
     const res = await axios.get(apiUrl);
     
-    // Remove the maintainer field and get tracks
-    const { maintainer, ...tracks } = res.data;
-    const trackList = Object.values(tracks);
-
-    if (!trackList || trackList.length === 0) {
-      return api.sendMessage("❌ No songs found for your query.", threadID, messageID);
+    if (!res.data || !res.data.audio) {
+      return api.sendMessage("❌ Could not find or download the song.", threadID, messageID);
     }
 
-    // Store search results in memory for this thread
-    memory[threadID].lastSearch = {
-      tracks: trackList,
-      timestamp: Date.now()
-    };
+    const audioUrl = res.data.audio;
+    const title = res.data.title || query;
+    const artist = res.data.artist || "Unknown";
 
-    // Format the results
-    let reply = `🎵 SPOTIFY SEARCH RESULTS\n━━━━━━━━━━━━━━━━\n`;
-    reply += `Query: "${query}"\n`;
-    reply += `Found: ${trackList.length} track(s)\n━━━━━━━━━━━━━━━━\n\n`;
+    // Create cache directory if it doesn't exist
+    const cacheDir = path.join(__dirname, "cache");
+    if (!fs.existsSync(cacheDir)) {
+      fs.mkdirSync(cacheDir, { recursive: true });
+    }
 
-    trackList.slice(0, 10).forEach((track, index) => {
-      reply += `${index + 1}. 🎤 ${track.name}\n`;
-      reply += `   👤 Artist: ${track.artist}\n`;
-      reply += `   ⏱️ Duration: ${track.duration}\n`;
-      reply += `   📅 Release: ${track.release}\n`;
-      reply += `   🔗 Link: ${track.url}\n`;
-      if (track.image) reply += `   🖼️ Image: ${track.image}\n`;
-      reply += `\n`;
+    // Download MP3
+    const mp3Path = path.join(cacheDir, `spotify_${Date.now()}.mp3`);
+    const audioRes = await axios.get(audioUrl, { 
+      responseType: "arraybuffer",
+      timeout: 30000 
     });
 
-    reply += `━━━━━━━━━━━━━━━━\n`;
-    reply += `💡 Reply with the number (1-${Math.min(10, trackList.length)}) to get more details.`;
+    fs.writeFileSync(mp3Path, audioRes.data);
 
-    // Store in memory
-    memory[threadID].push(`Spotify search returned ${trackList.length} results`);
+    // Send MP3 file
+    api.sendMessage(
+      {
+        body: `🎵 SONG FOUND\n━━━━━━━━━━━━━━━━\nTitle: ${title}\nArtist: ${artist}\n\n📥 Sending MP3 file...`,
+        attachment: fs.createReadStream(mp3Path)
+      },
+      threadID,
+      (err) => {
+        if (err) console.error("Error sending message:", err);
+        // Clean up file
+        try {
+          if (fs.existsSync(mp3Path)) {
+            fs.unlinkSync(mp3Path);
+          }
+        } catch (e) {
+          console.error("Error deleting file:", e);
+        }
+      },
+      messageID
+    );
 
-    api.sendMessage(reply, threadID, (err, info) => {
-      if (err) return console.error(err);
-      
-      // Store the message ID for reply handling
-      if (!memory[threadID].replyHandlers) memory[threadID].replyHandlers = {};
-      memory[threadID].replyHandlers[info.messageID] = {
-        tracks: trackList,
-        expires: Date.now() + 300000 // 5 minutes expiry
-      };
-    }, messageID);
+    memory[threadID].push(`Sent MP3: ${title}`);
 
   } catch (err) {
     console.error("Spotify Command Error:", err);
     
     api.sendMessage(
-      `❌ Error: ${err.message}`,
+      `❌ Error: ${err.message}\n\nTry using a different song name.`,
       threadID,
       messageID
     );
-  }
-};
-
-// Handle replies to show more details
-module.exports.handleReply = async function ({ api, event, handleReply }) {
-  const { threadID, messageID, senderID, body } = event;
-  const choice = parseInt(body);
-
-  try {
-    // Check if choice is valid
-    if (isNaN(choice) || choice < 1 || choice > handleReply.tracks.length) {
-      return api.sendMessage(
-        `❌ Please reply with a valid number between 1 and ${handleReply.tracks.length}.`, 
-        threadID, 
-        messageID
-      );
-    }
-
-    const track = handleReply.tracks[choice - 1];
-    
-    // Get sender name
-    const user = await api.getUserInfo(senderID);
-    const senderName = user[senderID]?.name || "User";
-
-    let details = `🎵 TRACK DETAILS\n━━━━━━━━━━━━━━━━\n`;
-    details += `🎤 Title: ${track.name}\n`;
-    details += `👤 Artist: ${track.artist}\n`;
-    details += `⏱️ Duration: ${track.duration}\n`;
-    details += `📅 Release Date: ${track.release}\n`;
-    details += `━━━━━━━━━━━━━━━━\n`;
-    details += `🔗 Listen on Spotify:\n${track.url}\n`;
-    details += `━━━━━━━━━━━━━━━━\n`;
-    if (track.image) {
-      details += `🖼️ Album Art: ${track.image}\n`;
-    }
-    details += `💬 Requested by: ${senderName}`;
-
-    // Store in memory
-    if (!memory[threadID]) memory[threadID] = [];
-    memory[threadID].push(`${senderName} selected: ${track.name} by ${track.artist}`);
-
-    api.sendMessage(details, threadID, messageID);
-
-  } catch (err) {
-    console.error("Spotify Reply Error:", err);
-    api.sendMessage(`❌ Error: ${err.message}`, threadID, messageID);
   }
 };
