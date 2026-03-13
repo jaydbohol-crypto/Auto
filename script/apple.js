@@ -6,8 +6,8 @@ module.exports.config = {
   name: "apple",
   version: "1.0.0",
   hasPermssion: 0,
-  credits: "selov",
-  description: "Search and play Apple Music previews",
+  credits: "Yasis",
+  description: "Download Apple Music previews",
   commandCategory: "music",
   usages: "apple <song name>",
   cooldowns: 2
@@ -27,7 +27,7 @@ module.exports.run = async function ({ api, event, args }) {
 
     // Initialize memory
     if (!memory[threadID]) memory[threadID] = [];
-    memory[threadID].push(`${senderName} searched Apple Music for: ${query || "nothing"}`);
+    memory[threadID].push(`${senderName} requested: ${query}`);
 
     if (!query) {
       return api.sendMessage(
@@ -39,98 +39,29 @@ module.exports.run = async function ({ api, event, args }) {
 
     const searching = await api.sendMessage("🔍 Searching Apple Music...", threadID, messageID);
 
-    // Your working API
-    const apiUrl = `https://betadash-api-swordslush-production.up.railway.app/shazam?title=${encodeURIComponent(query)}&limit=5`;
+    // Your working API with limit 1 for first result only
+    const apiUrl = `https://betadash-api-swordslush-production.up.railway.app/shazam?title=${encodeURIComponent(query)}&limit=1`;
     
     const res = await axios.get(apiUrl);
     const tracks = res.data.results;
 
     if (!tracks || tracks.length === 0) {
-      return api.sendMessage("❌ No songs found.", threadID, messageID);
+      return api.editMessage("❌ No songs found.", searching.messageID);
     }
 
-    // Store search results in memory
-    memory[threadID].lastSearch = {
-      tracks: tracks,
-      timestamp: Date.now(),
-      messageID: searching.messageID
-    };
-
-    // Format the results
-    let reply = `🎵 APPLE MUSIC SEARCH\n━━━━━━━━━━━━━━━━\n`;
-    reply += `Query: "${query}"\n`;
-    reply += `Found: ${tracks.length} track(s)\n━━━━━━━━━━━━━━━━\n\n`;
-
-    tracks.forEach((track, index) => {
-      reply += `${index + 1}. 🎤 ${track.title}\n`;
-      reply += `   👤 Artist: ${track.artistName}\n`;
-      reply += `   💿 Album: ${track.albumName}\n`;
-      
-      // Format duration from milliseconds
-      const minutes = Math.floor(track.durationInMillis / 60000);
-      const seconds = ((track.durationInMillis % 60000) / 1000).toFixed(0);
-      reply += `   ⏱️ Duration: ${minutes}:${seconds.padStart(2, '0')}\n`;
-      
-      reply += `   📅 Release: ${track.releaseDate}\n`;
-      reply += `   🎵 Genre: ${track.genreNames.join(', ')}\n`;
-      reply += `\n`;
-    });
-
-    reply += `━━━━━━━━━━━━━━━━\n`;
-    reply += `💡 Reply with the number (1-${tracks.length}) to hear a 30-second preview.`;
-
-    // Update the searching message with results
-    return api.editMessage(reply, searching.messageID);
-
-  } catch (err) {
-    console.error("Apple Music Error:", err);
-    
-    return api.sendMessage(
-      `❌ Error: ${err.message}`,
-      threadID,
-      messageID
-    );
-  }
-};
-
-// Handle replies to play previews
-module.exports.handleReply = async function ({ api, event, handleReply }) {
-  const { threadID, messageID, senderID, body } = event;
-  
-  try {
-    // Check if we have stored tracks
-    if (!memory[threadID] || !memory[threadID].lastSearch) {
-      return api.sendMessage(
-        "❌ No active search found. Please do a new search with 'apple <song name>'.", 
-        threadID, 
-        messageID
-      );
-    }
-
-    const choice = parseInt(body);
-    const tracks = memory[threadID].lastSearch.tracks;
-
-    // Validate choice
-    if (isNaN(choice) || choice < 1 || choice > tracks.length) {
-      return api.sendMessage(
-        `❌ Please reply with a valid number between 1 and ${tracks.length}.`, 
-        threadID, 
-        messageID
-      );
-    }
-
-    const track = tracks[choice - 1];
+    // Get the first track
+    const track = tracks[0];
     
     // Check if preview URL exists
     if (!track.previewUrl) {
-      return api.sendMessage("❌ No preview available for this track.", threadID, messageID);
+      return api.editMessage("❌ No preview available for this track.", searching.messageID);
     }
 
-    const user = await api.getUserInfo(senderID);
-    const senderName = user[senderID]?.name || "User";
-
-    // Send "downloading" message
-    const downloading = await api.sendMessage("⏳ Downloading preview...", threadID, messageID);
+    // Update searching message
+    api.editMessage(
+      `📥 Downloading: ${track.title} by ${track.artistName}\n⏱️ Duration: ${formatDuration(track.durationInMillis)}\n📦 Please wait...`, 
+      searching.messageID
+    );
 
     // Create cache directory
     const cacheDir = path.join(__dirname, "cache");
@@ -138,27 +69,39 @@ module.exports.handleReply = async function ({ api, event, handleReply }) {
       fs.mkdirSync(cacheDir, { recursive: true });
     }
 
-    // Download the preview audio
+    // Download the preview audio (Apple Music previews are already small ~30 seconds)
     const audioPath = path.join(cacheDir, `apple_${Date.now()}.m4a`);
     const audioRes = await axios.get(track.previewUrl, { 
       responseType: "arraybuffer",
-      timeout: 15000 
+      timeout: 15000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
     });
 
     fs.writeFileSync(audioPath, audioRes.data);
 
+    // Get file size (Apple Music previews are typically 200-500KB only)
+    const stats = fs.statSync(audioPath);
+    const fileSizeInKB = (stats.size / 1024).toFixed(2);
+
     // Format duration
-    const minutes = Math.floor(track.durationInMillis / 60000);
-    const seconds = ((track.durationInMillis % 60000) / 1000).toFixed(0);
+    const duration = formatDuration(track.durationInMillis);
+    
+    // Format genres
+    const genres = track.genreNames.join(', ');
 
     // Send the audio preview
     api.sendMessage(
       {
         body: `🎵 APPLE MUSIC PREVIEW\n━━━━━━━━━━━━━━━━\n` +
-              `🎤 ${track.title}\n` +
-              `👤 ${track.artistName}\n` +
-              `💿 ${track.albumName}\n` +
-              `⏱️ ${minutes}:${seconds.padStart(2, '0')}\n` +
+              `🎤 Title: ${track.title}\n` +
+              `👤 Artist: ${track.artistName}\n` +
+              `💿 Album: ${track.albumName}\n` +
+              `⏱️ Duration: ${duration}\n` +
+              `🎵 Genre: ${genres}\n` +
+              `📅 Released: ${track.releaseDate}\n` +
+              `📦 Size: ${fileSizeInKB} KB\n` +
               `━━━━━━━━━━━━━━━━\n` +
               `🔗 Full song: ${track.appleMusicUrl}\n` +
               `💬 Requested by: ${senderName}`,
@@ -179,14 +122,26 @@ module.exports.handleReply = async function ({ api, event, handleReply }) {
       messageID
     );
 
-    // Update the downloading message
-    api.editMessage("✅ Preview ready! Sending...", downloading.messageID);
+    // Update the searching message
+    api.editMessage(`✅ Preview ready! (${fileSizeInKB} KB)`, searching.messageID);
 
     // Store in memory
-    memory[threadID].push(`${senderName} played preview: ${track.title} by ${track.artistName}`);
+    memory[threadID].push(`Downloaded: ${track.title} by ${track.artistName}`);
 
   } catch (err) {
-    console.error("Apple Music Reply Error:", err);
-    return api.sendMessage(`❌ Error: ${err.message}`, threadID, messageID);
+    console.error("Apple Music Error:", err);
+    
+    return api.sendMessage(
+      `❌ Error: ${err.message}`,
+      threadID,
+      messageID
+    );
   }
 };
+
+// Helper function to format duration from milliseconds
+function formatDuration(millis) {
+  const minutes = Math.floor(millis / 60000);
+  const seconds = ((millis % 60000) / 1000).toFixed(0);
+  return `${minutes}:${seconds.padStart(2, '0')}`;
+}
