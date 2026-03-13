@@ -6,7 +6,7 @@ module.exports.config = {
   name: "ai",
   version: "3.0.0",
   hasPermssion: 0,
-  credits: "Yasis",
+  credits: "selov",
   description: "AI with voice response",
   commandCategory: "search",
   usages: "ai <ask a questions>",
@@ -45,7 +45,7 @@ module.exports.run = async function ({ api, event, args }) {
     }
 
     // Send typing indicator
-    api.sendMessage("🔊 AI is thinking and preparing voice response...", threadID, messageID);
+    api.sendMessage("", threadID, messageID);
 
     // Get AI response
     const aiUrl = `https://vern-rest-api.vercel.app/api/chatgpt4?prompt=${encodeURIComponent(prompt)}`;
