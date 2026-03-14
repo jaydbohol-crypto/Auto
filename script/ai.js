@@ -4,16 +4,17 @@ const path = require("path");
 
 module.exports.config = {
   name: "ai",
-  version: "5.0.0",
+  version: "6.0.0",
   hasPermssion: 0,
-  credits: "Yasis",
+  credits: "selov",
   description: "AI with customizable voice responses",
   commandCategory: "search",
-  usages: "ai <text> or ai -voice <voice> <text>",
-  cooldowns: 3
+  usages: "/ai <text> or /ai -voice <voice> <text>",
+  cooldowns: 3,
+  usePrefix: true // Indicates this command uses a prefix
 };
 
-// Voice library with different options [citation:2][citation:5]
+// Voice library with different options 
 const voices = {
   // Deep male voices
   "male1": { name: "en-US-Neural2-J", gender: "MALE", desc: "Deep male voice (US)" },
@@ -28,7 +29,7 @@ const voices = {
   "female3": { name: "en-GB-Neural2-A", gender: "FEMALE", desc: "British female" },
   "female4": { name: "en-US-Studio-F", gender: "FEMALE", desc: "Studio female voice" },
   
-  // High-quality Chirp voices [citation:2]
+  // High-quality Chirp voices 
   "chirp-male": { name: "en-US-Chirp3-HD-Charon", gender: "MALE", desc: "Ultra-realistic deep voice" },
   "chirp-female": { name: "en-US-Chirp3-HD-Kore", gender: "FEMALE", desc: "Ultra-realistic female voice" },
   "chirp-female2": { name: "en-US-Chirp3-HD-Leda", gender: "FEMALE", desc: "Expressive female voice" },
@@ -46,9 +47,9 @@ const memory = {};
 module.exports.run = async function ({ api, event, args }) {
   const { threadID, messageID, attachments, senderID } = event;
 
-  let prompt = args.join(" ").trim();
-  let selectedVoice = "chirp-male"; // Default voice
-
+  // Join all args to get the full prompt
+  let fullInput = args.join(" ").trim();
+  
   try {
     // Get user info with full details
     const user = await api.getUserInfo(senderID);
@@ -65,15 +66,31 @@ module.exports.run = async function ({ api, event, args }) {
       };
     }
 
-    // Check for voice selection in command
-    // Format: ai -voice male1 what is your name?
-    if (prompt.startsWith('-voice ')) {
-      const parts = prompt.split(' ');
+    // Check if user is asking for help or voice list
+    if (fullInput === "help" || fullInput === "voices") {
+      const voiceList = Object.entries(voices).map(([key, v]) => 
+        `• ${key}: ${v.desc}`
+      ).join('\n');
+      
+      return api.sendMessage(
+        `🎤 **Available Voices**\n\n${voiceList}\n\n**How to use:**\n/ai -voice <voice> <text>\n\n**Examples:**\n/ai -voice male1 what is your name?\n/ai -voice british-female tell me a joke\n/ai -voice chirp-male hello`,
+        threadID,
+        messageID
+      );
+    }
+
+    let prompt = fullInput;
+    let selectedVoice = "chirp-male"; // Default voice
+
+    // Parse voice selection from command
+    // Format: /ai -voice male1 what is your name?
+    if (fullInput.startsWith('-voice ')) {
+      const parts = fullInput.split(' ');
       const voiceKey = parts[1].toLowerCase();
       
       if (voices[voiceKey]) {
         selectedVoice = voiceKey;
-        prompt = parts.slice(2).join(' '); // Remove voice command from prompt
+        prompt = parts.slice(2).join(' '); // Remove -voice and voice name from prompt
         // Save user's voice preference
         memory[threadID].userVoice[senderID] = voiceKey;
       } else {
@@ -83,7 +100,7 @@ module.exports.run = async function ({ api, event, args }) {
         ).join('\n');
         
         return api.sendMessage(
-          `🎤 Available voices:\n\n${voiceList}\n\nUsage: ai -voice <voice> <text>\nExample: ai -voice male1 what is your name?`,
+          `❌ Invalid voice: "${voiceKey}"\n\n🎤 **Available voices:**\n${voiceList}\n\n**Usage:** /ai -voice <voice> <text>\n**Example:** /ai -voice male1 what is your name?`,
           threadID,
           messageID
         );
@@ -102,7 +119,7 @@ module.exports.run = async function ({ api, event, args }) {
       interactions: (memory[threadID].users[senderID]?.interactions || 0) + 1
     };
 
-    // Check image
+    // Check image attachment
     if (attachments && attachments.length > 0) {
       const photo = attachments.find(a => a.type === "photo");
       if (photo) {
@@ -113,7 +130,7 @@ module.exports.run = async function ({ api, event, args }) {
 
     if (!prompt) {
       return api.sendMessage(
-        `📌 Hello ${firstName}! Ask me anything.\n\nTo change voice: ai -voice <voice> <text>\nExample: ai -voice male1 what is your name?`,
+        `📌 Hello ${firstName}! Ask me anything.\n\n**To change voice:** /ai -voice <voice> <text>\n**To see voices:** /ai voices\n\n**Example:** /ai -voice male1 what is your name?`,
         threadID,
         messageID
       );
@@ -124,7 +141,7 @@ module.exports.run = async function ({ api, event, args }) {
 
     const voiceInfo = voices[selectedVoice];
     const searching = await api.sendMessage(
-      `🔊 AI is thinking and preparing ${voiceInfo.desc} response for ${firstName}...`, 
+      `🔊 AI is thinking and preparing **${voiceInfo.desc}** response for ${firstName}...`, 
       threadID, 
       messageID
     );
@@ -172,16 +189,9 @@ module.exports.run = async function ({ api, event, args }) {
       fs.mkdirSync(cacheDir, { recursive: true });
     }
 
-    // Convert text to speech with selected voice [citation:1][citation:9]
-    // Using Google TTS with specific voice parameters
-    const ttsText = replyText.substring(0, 200); // Limit to 200 chars
-    
-    // Using voice-specific TTS API
+    // Convert text to speech (limited to 200 chars for free TTS)
+    const ttsText = replyText.substring(0, 200);
     const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=en&client=tw-ob&q=${encodeURIComponent(ttsText)}`;
-    
-    // Note: Free Google TTS doesn't support voice selection
-    // For advanced voices, you'd need Google Cloud TTS API key
-    // Alternative: Use voice-specific parameters if available
     
     const audioPath = path.join(cacheDir, `tts_${Date.now()}.mp3`);
     const audioResponse = await axios.get(ttsUrl, { 
@@ -201,8 +211,8 @@ module.exports.run = async function ({ api, event, args }) {
     // Update searching message
     api.editMessage(
       `✅ Voice response ready for ${firstName}!\n` +
-      `Voice: ${voiceInfo.desc}\n` +
-      `Size: ${fileSizeInKB} KB`,
+      `**Voice:** ${voiceInfo.desc}\n` +
+      `**Size:** ${fileSizeInKB} KB`,
       searching.messageID
     );
 
@@ -214,6 +224,7 @@ module.exports.run = async function ({ api, event, args }) {
       threadID,
       (err) => {
         if (err) console.error("Error sending audio:", err);
+        // Clean up file
         try {
           if (fs.existsSync(audioPath)) {
             fs.unlinkSync(audioPath);
@@ -228,22 +239,9 @@ module.exports.run = async function ({ api, event, args }) {
   } catch (err) {
     console.error("AI TTS Error:", err);
     return api.sendMessage(
-      `❌ Failed to generate voice response.\n${err.message}`,
+      `❌ Failed to generate voice response.\n**Error:** ${err.message}`,
       threadID,
       messageID
     );
   }
-};
-
-// Command to list available voices
-module.exports.voices = async function({ api, event }) {
-  const voiceList = Object.entries(voices).map(([key, v]) => 
-    `• ${key}: ${v.desc}`
-  ).join('\n');
-  
-  return api.sendMessage(
-    `🎤 Available Voices:\n\n${voiceList}\n\nTo use: ai -voice <voice> <text>\nExample: ai -voice male1 hello`,
-    event.threadID,
-    event.messageID
-  );
 };
