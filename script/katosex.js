@@ -4,9 +4,9 @@ const path = require("path");
 
 module.exports.config = {
   name: "katorsex",
-  version: "1.0.0",
+  version: "2.0.0",
   hasPermssion: 0,
-  credits: "selov",
+  credits: "Yasis",
   description: "Get videos from Katorsex API",
   commandCategory: "video",
   usages: "/katorsex [page number] or /katorsex [search]",
@@ -36,8 +36,13 @@ module.exports.run = async function ({ api, event, args }) {
     const senderName = user[senderID]?.name || "User";
 
     // Initialize memory
-    if (!memory[threadID]) memory[threadID] = [];
-    memory[threadID].push(`${senderName} requested katorsex videos (page ${page})`);
+    if (!memory[threadID]) {
+      memory[threadID] = {
+        history: [],
+        videoLists: {}
+      };
+    }
+    memory[threadID].history.push(`${senderName} requested katorsex videos (page ${page})`);
 
     // Fetch videos from API
     const apiUrl = `https://betadash-api-swordslush-production.up.railway.app/katorsex?page=${page}`;
@@ -64,18 +69,25 @@ module.exports.run = async function ({ api, event, args }) {
       }
     }
 
+    // Limit to first 10 videos for display
+    const displayVideos = videos.slice(0, 10);
+
     // Create a numbered list of videos
-    let listMessage = `📋 **KATORSEX VIDEOS** (Page ${page})\n━━━━━━━━━━━━━━━━\n`;
-    listMessage += `Found: ${videos.length} videos\n\n`;
+    let listMessage = `📋 **KATORSEX VIDEOS** (Page ${page})\n`;
+    listMessage += `━━━━━━━━━━━━━━━━\n`;
+    listMessage += `Found: ${videos.length} videos\n`;
+    listMessage += `Showing: ${displayVideos.length} videos\n\n`;
     
-    videos.slice(0, 10).forEach((video, index) => {
+    displayVideos.forEach((video, index) => {
       listMessage += `${index + 1}. **${video.title}**\n`;
-      listMessage += `   📎 [Download Link](${video.downloadUrl})\n\n`;
+      if (video.duration) listMessage += `   ⏱️ Duration: ${video.duration}\n`;
+      if (video.views) listMessage += `   👁️ Views: ${video.views}\n`;
+      listMessage += `\n`;
     });
     
     listMessage += `━━━━━━━━━━━━━━━━\n`;
-    listMessage += `Reply with the number (1-${Math.min(10, videos.length)}) to download the video.`;
-    
+    listMessage += `💡 Reply with the number (1-${displayVideos.length}) to download the video.`;
+
     // Delete waiting message
     api.unsendMessage(waiting.messageID);
     
@@ -86,11 +98,12 @@ module.exports.run = async function ({ api, event, args }) {
       // Store videos in memory for this thread with the message ID
       if (!memory[threadID].videoLists) memory[threadID].videoLists = {};
       memory[threadID].videoLists[info.messageID] = {
-        videos: videos,
+        videos: displayVideos, // Store only the displayed videos
+        allVideos: videos,
         page: page,
         expires: Date.now() + 300000 // 5 minutes expiry
       };
-    }, messageID);
+    });
 
   } catch (err) {
     console.error("Katorsex Command Error:", err);
@@ -125,6 +138,26 @@ module.exports.handleReply = async function ({ api, event, handleReply }) {
     const user = await api.getUserInfo(senderID);
     const senderName = user[senderID]?.name || "User";
 
+    // FIXED: The video URL might be in different fields
+    let videoUrl = null;
+    
+    if (selectedVideo.videoUrl) {
+      videoUrl = selectedVideo.videoUrl;
+    } else if (selectedVideo.downloadUrl) {
+      videoUrl = selectedVideo.downloadUrl;
+    } else if (selectedVideo.url) {
+      videoUrl = selectedVideo.url;
+    } else if (selectedVideo.link) {
+      videoUrl = selectedVideo.link;
+    } else if (selectedVideo.video) {
+      videoUrl = selectedVideo.video;
+    }
+
+    if (!videoUrl) {
+      console.log("Selected video:", selectedVideo);
+      return api.sendMessage("❌ Video URL not found in API response.", threadID, messageID);
+    }
+
     const downloading = await api.sendMessage(`⏳ Downloading: ${selectedVideo.title}...`, threadID, messageID);
 
     // Create cache directory
@@ -136,60 +169,68 @@ module.exports.handleReply = async function ({ api, event, handleReply }) {
     // Download the video
     const videoPath = path.join(cacheDir, `katorsex_${Date.now()}.mp4`);
     
-    const videoResponse = await axios.get(selectedVideo.videoUrl, {
-      responseType: "arraybuffer",
-      timeout: 60000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Referer': 'https://katorsex.me/'
-      }
-    });
+    try {
+      const videoResponse = await axios.get(videoUrl, {
+        responseType: "arraybuffer",
+        timeout: 60000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8',
+          'Referer': 'https://betadash-api-swordslush-production.up.railway.app/'
+        }
+      });
 
-    fs.writeFileSync(videoPath, videoResponse.data);
-    
-    // Get file size
-    const stats = fs.statSync(videoPath);
-    const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+      fs.writeFileSync(videoPath, videoResponse.data);
+      
+      // Get file size
+      const stats = fs.statSync(videoPath);
+      const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
 
-    // Delete downloading message
-    api.unsendMessage(downloading.messageID);
+      // Delete downloading message
+      api.unsendMessage(downloading.messageID);
 
-    // Send the video
-    api.sendMessage(
-      {
-        body: `🎬 **KATORSEX VIDEO**\n━━━━━━━━━━━━━━━━\n` +
-              `**Title:** ${selectedVideo.title}\n` +
-              `**Size:** ${fileSizeMB} MB\n` +
-              `**Page:** ${videoData.page}\n` +
-              `━━━━━━━━━━━━━━━━\n` +
-              `💬 Requested by: ${senderName}`,
-        attachment: fs.createReadStream(videoPath)
-      },
-      threadID,
-      (err) => {
-        if (err) console.error("Error sending video:", err);
-        // Clean up file after 5 minutes
-        setTimeout(() => {
-          try {
-            if (fs.existsSync(videoPath)) {
-              fs.unlinkSync(videoPath);
-            }
-          } catch (e) {}
-        }, 300000);
-      },
-      messageID
-    );
+      // Send the video
+      api.sendMessage(
+        {
+          body: `🎬 **KATORSEX VIDEO**\n━━━━━━━━━━━━━━━━\n` +
+                `**Title:** ${selectedVideo.title}\n` +
+                `**Size:** ${fileSizeMB} MB\n` +
+                `**Page:** ${videoData.page}\n` +
+                `━━━━━━━━━━━━━━━━\n` +
+                `💬 Requested by: ${senderName}`,
+          attachment: fs.createReadStream(videoPath)
+        },
+        threadID,
+        (err) => {
+          if (err) console.error("Error sending video:", err);
+          // Clean up file after sending
+          setTimeout(() => {
+            try {
+              if (fs.existsSync(videoPath)) {
+                fs.unlinkSync(videoPath);
+              }
+            } catch (e) {}
+          }, 5000);
+        },
+        messageID
+      );
 
-    // Store in memory
-    if (!memory[threadID].videos) memory[threadID].videos = [];
-    memory[threadID].videos.push({
-      user: senderName,
-      title: selectedVideo.title,
-      time: Date.now()
-    });
+      // Store in history
+      if (!memory[threadID].videos) memory[threadID].videos = [];
+      memory[threadID].videos.push({
+        user: senderName,
+        title: selectedVideo.title,
+        time: Date.now()
+      });
+
+    } catch (downloadErr) {
+      console.error("Download error:", downloadErr);
+      api.unsendMessage(downloading.messageID);
+      api.sendMessage(`❌ Failed to download video: ${downloadErr.message}`, threadID, messageID);
+    }
 
   } catch (err) {
     console.error("Katorsex Reply Error:", err);
-    api.sendMessage(`❌ Download failed: ${err.message}`, threadID, messageID);
+    api.sendMessage(`❌ Error: ${err.message}`, threadID, messageID);
   }
 };
