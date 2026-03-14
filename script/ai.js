@@ -26,16 +26,7 @@ module.exports.run = async function ({ api, event, args }) {
     const user = await api.getUserInfo(senderID);
     const userData = user[senderID];
     const senderName = userData?.name || "User";
-    const firstName = senderName.split(' ')[0] || senderName; // Get first name only
-    
-    // Get additional user info if available
-    const userProfile = {
-      fullName: senderName,
-      firstName: firstName,
-      lastName: senderName.split(' ').slice(1).join(' ') || '',
-      gender: userData?.gender || 'unknown',
-      isFriend: userData?.isFriend || false
-    };
+    const firstName = senderName.split(' ')[0] || senderName;
 
     // Initialize memory with user profile
     if (!memory[threadID]) {
@@ -70,24 +61,18 @@ module.exports.run = async function ({ api, event, args }) {
       );
     }
 
-    // Send typing indicator
+    // Send typing indicator only (no visible message)
     api.sendTypingIndicator(threadID, true);
-    
-    const searching = await api.sendMessage(
-      ``, 
-      threadID, 
-      messageID
-    );
 
     // Enhance prompt with user's name for personalized response
     const enhancedPrompt = `The user's name is ${firstName} (full name: ${senderName}). Please address them by their name in your response naturally. Keep your response concise and friendly. Question: ${prompt}`;
 
-    // Get AI response
+    // Get AI response (YOUR ORIGINAL API)
     const aiUrl = `https://vern-rest-api.vercel.app/api/chatgpt4?prompt=${encodeURIComponent(enhancedPrompt)}`;
     const aiResponse = await axios.get(aiUrl);
 
     if (!aiResponse.data) {
-      return api.editMessage("❌ No response from AI server.", searching.messageID);
+      return; // Silent fail
     }
 
     // Detect response format automatically
@@ -99,7 +84,7 @@ module.exports.run = async function ({ api, event, args }) {
 
     if (!replyText) {
       console.log("API RAW RESPONSE:", aiResponse.data);
-      return api.editMessage("❌ AI returned an unknown response format.", searching.messageID);
+      return; // Silent fail
     }
 
     // Store conversation in memory
@@ -122,10 +107,12 @@ module.exports.run = async function ({ api, event, args }) {
       fs.mkdirSync(cacheDir, { recursive: true });
     }
 
-    // Convert text to speech with proper pacing for name pronunciation
-    // Limit to 200 chars for TTS
-    const ttsText = replyText.substring(0, 200);
-    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=en&client=tw-ob&q=${encodeURIComponent(ttsText)}`;
+    // Convert text to speech with NORMAL BOY VOICE
+    // Using StreamElements API for better voice quality
+    const ttsText = encodeURIComponent(replyText.substring(0, 200));
+    
+    // CHANGED: Using "Joey" for normal boy voice (not deep)
+    const ttsUrl = `https://api.streamelements.com/kappa/v2/speech?voice=Joey&text=${ttsText}`;
     
     const audioPath = path.join(cacheDir, `tts_${Date.now()}.mp3`);
     const audioResponse = await axios.get(ttsUrl, { 
@@ -138,17 +125,7 @@ module.exports.run = async function ({ api, event, args }) {
 
     fs.writeFileSync(audioPath, audioResponse.data);
 
-    // Get file size
-    const stats = fs.statSync(audioPath);
-    const fileSizeInKB = (stats.size / 1024).toFixed(2);
-
-    // Update searching message
-    api.editMessage(
-      ``, 
-      searching.messageID
-    );
-
-    // Send only audio (no text)
+    // Send ONLY audio - no text messages at all
     api.sendMessage(
       {
         attachment: fs.createReadStream(audioPath)
@@ -168,22 +145,8 @@ module.exports.run = async function ({ api, event, args }) {
       messageID
     );
 
-    // Optional: Also send a text preview for users who prefer reading
-    // Uncomment below if you want both text and audio
-    /*
-    api.sendMessage(
-      `📝 Response for ${firstName}:\n\n${replyText}`,
-      threadID,
-      messageID
-    );
-    */
-
   } catch (err) {
     console.error("AI TTS Error:", err);
-    return api.sendMessage(
-      `❌ Failed to generate voice response.\n${err.message}`,
-      threadID,
-      messageID
-    );
+    // Silent fail - no message shown to user
   }
 };
