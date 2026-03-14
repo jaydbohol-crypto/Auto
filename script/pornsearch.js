@@ -11,7 +11,7 @@ const path = require('path');
 module.exports.config = {
   name: 'pornsearch',
   version: '1.0.0',
-  role: 2,
+  role: 0,
   credits: 'selov',
   description: 'Search and get a single video from PornHub via the betadash‑api.',
   usages: '<query>',
