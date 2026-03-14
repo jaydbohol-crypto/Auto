@@ -3,34 +3,25 @@ module.exports.config = {
   version: "1.0", 
   role: 0,
   credits: "syntaxt0x1c",
-  description: "Search PornHub for videos.",
-  usages: "[keyword]",
+  description: "Get a random PornHub video.",
 };
 
 module.exports.run = async ({ api, event }) => {
   const axios = require('axios');
   
   try {
-    // Extract search query
-    let query = (event.body).slice(6);
-    
-    if (!query) return await api.sendMessage("Please provide a keyword.", event.threadID);
+    // Construct API request URL
+    const url = 'https://betadash-api-swordslush-production.up.railway.app/pornhub/random';
 
-    // Construct API request URL with proper encoding
-    const url = `https://betadash-api-swordslush-production.up.railway.app/pornhub/search?q=${encodeURIComponent(query)}`;
-
-    // Send request to PornHub search endpoint
+    // Send request to PornHub random endpoint
     const response = await axios.get(url);
     
-    if (!response.data || !Array.isArray(response.data.videos)) {
-      return await api.sendMessage("No results found.", event.threadID);
+    if (!response.data || !response.data.videos) {
+      return api.sendMessage("Failed to fetch video.", event.threadID);
     }
 
-    // Extract first video URL
     let videoUrl;
-    for (let i = 0; i < Math.min(3, response.data.videos.length); i++) {
-      const video = response.data.videos[i];
-      
+    for (const video of response.data.videos) {
       if (!video.link) continue;
 
       try {
@@ -42,9 +33,9 @@ module.exports.run = async ({ api, event }) => {
       } catch (e) {}
     }
 
-    if (!videoUrl) return await api.sendMessage("No playable videos found.", event.threadID);
+    if (!videoUrl) return api.sendMessage("No playable videos available.", event.threadID);
 
-    // Send the video
+    // Download the video to cache
     const cacheDir = path.join(__dirname, "cache");
     fs.existsSync(cacheDir) || fs.mkdirSync(cacheDir, { recursive: true });
     
@@ -64,7 +55,7 @@ module.exports.run = async ({ api, event }) => {
     }, 3000);
 
   } catch (error) {
-    console.error("Porn search error:", error.message);
-    return await api.sendMessage(`Error searching porn: ${error.message}`, event.threadID);
+    console.error("Porn download error:", error.message);
+    return api.sendMessage(`Download failed: ${error.message}`, event.threadID);
   }
 };
