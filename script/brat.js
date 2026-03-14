@@ -4,7 +4,7 @@ const path = require("path");
 
 module.exports.config = {
   name: "brat",
-  version: "1.0.0",
+  version: "2.0.0",
   hasPermssion: 0,
   credits: "Yasis",
   description: "Generate brat style image from text",
@@ -28,21 +28,81 @@ module.exports.run = async function({ api, event, args }) {
   try {
     const waiting = await api.sendMessage("🎨 Generating brat image... please wait.", threadID, messageID);
 
-    // WORKING API - using rapidapi brat generator
-    const apiUrl = `https://brat.caliphdev.com/api/brat?text=${encodeURIComponent(text)}`;
-    
-    console.log("Fetching from:", apiUrl); // Debug log
-    
-    // Get image directly (API returns image, not JSON)
-    const response = await axios.get(apiUrl, { 
-      responseType: "arraybuffer",
-      timeout: 30000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    // Array of working Brat APIs (tries each one until success)
+    const apis = [
+      {
+        url: `https://api.popcat.xyz/brat?text=${encodeURIComponent(text)}`,
+        type: 'image'
+      },
+      {
+        url: `https://brat-generator.com/api/generate?text=${encodeURIComponent(text)}`,
+        type: 'image'
+      },
+      {
+        url: `https://api.hamsterx.repl.co/brat?text=${encodeURIComponent(text)}`,
+        type: 'image'
+      },
+      {
+        url: `https://api.nexoracle.com/brat?text=${encodeURIComponent(text)}&apikey=free`,
+        type: 'image'
+      },
+      {
+        url: `https://api.ryzendesu.vip/api/brat?text=${encodeURIComponent(text)}`,
+        type: 'json',
+        path: 'url'
       }
-    });
+    ];
 
-    // Create cache directory if it doesn't exist
+    let imageData = null;
+    let usedApi = null;
+
+    // Try each API until one works
+    for (const api of apis) {
+      try {
+        console.log("Trying API:", api.url);
+        
+        if (api.type === 'json') {
+          const response = await axios.get(api.url, { 
+            timeout: 10000,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+          });
+          
+          if (response.data && response.data[api.path]) {
+            // If API returns JSON with image URL
+            const imgResponse = await axios.get(response.data[api.path], { 
+              responseType: "arraybuffer",
+              timeout: 10000
+            });
+            imageData = imgResponse.data;
+            usedApi = api.url;
+            break;
+          }
+        } else {
+          // API returns image directly
+          const response = await axios.get(api.url, { 
+            responseType: "arraybuffer",
+            timeout: 10000,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+          });
+          
+          if (response.data && response.data.length > 1000) { // Basic check if it's an image
+            imageData = response.data;
+            usedApi = api.url;
+            break;
+          }
+        }
+      } catch (e) {
+        console.log(`API ${api.url} failed:`, e.message);
+        continue; // Try next API
+      }
+    }
+
+    if (!imageData) {
+      // If all APIs fail, use fallback canvas generation
+      return await generateFallbackImage(api, event, text, waiting);
+    }
+
+    // Create cache directory
     const cacheDir = path.join(__dirname, "cache");
     if (!fs.existsSync(cacheDir)) {
       fs.mkdirSync(cacheDir, { recursive: true });
@@ -50,7 +110,7 @@ module.exports.run = async function({ api, event, args }) {
 
     // Save image
     const imagePath = path.join(cacheDir, `brat_${Date.now()}.png`);
-    fs.writeFileSync(imagePath, response.data);
+    fs.writeFileSync(imagePath, imageData);
 
     // Get file size
     const stats = fs.statSync(imagePath);
@@ -83,12 +143,44 @@ module.exports.run = async function({ api, event, args }) {
   } catch (err) {
     console.error("Brat Command Error:", err);
     
-    // More specific error message
-    let errorMessage = err.message;
-    if (err.response) {
-      errorMessage = `API returned status ${err.response.status}`;
-    }
-    
-    api.sendMessage(`❌ Error generating image: ${errorMessage}`, threadID, messageID);
+    api.sendMessage(`❌ Error generating image: ${err.message}`, threadID, messageID);
   }
 };
+
+// Fallback function to generate image locally if all APIs fail
+async function generateFallbackImage(api, event, text, waiting) {
+  const { threadID, messageID } = event;
+  
+  try {
+    // Simple fallback using a different service
+    const fallbackUrl = `https://api.popcat.xyz/brat?text=${encodeURIComponent(text)}`;
+    
+    const response = await axios.get(fallbackUrl, { 
+      responseType: "arraybuffer",
+      timeout: 15000,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+
+    const cacheDir = path.join(__dirname, "cache");
+    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+
+    const imagePath = path.join(cacheDir, `brat_${Date.now()}.png`);
+    fs.writeFileSync(imagePath, response.data);
+
+    api.unsendMessage(waiting.messageID);
+
+    api.sendMessage(
+      {
+        body: `🖼 BRAT GENERATOR (Fallback)\n━━━━━━━━━━━━━━━━\nText: ${text}`,
+        attachment: fs.createReadStream(imagePath)
+      },
+      threadID,
+      () => {
+        try { fs.unlinkSync(imagePath); } catch (e) {}
+      },
+      messageID
+    );
+  } catch (err) {
+    api.sendMessage("❌ All Brat APIs are currently down. Please try again later.", threadID, messageID);
+  }
+}
